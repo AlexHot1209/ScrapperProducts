@@ -1,0 +1,12 @@
+{
+  "name": "scrapper-products-monorepo",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend/packages/shared/types"
+  ],
+  "scripts": {
+    "lint:frontend": "npm --workspace frontend run lint",
+    "format:frontend": "npm --workspace frontend run format"
+  }
+}

@@ -1,0 +1,15 @@
+alembic==1.14.1
+fastapi==0.115.6
+psycopg[binary]==3.2.3
+pydantic==2.10.6
+pydantic-settings==2.7.1
+python-multipart==0.0.20
+redis==5.2.1
+rq==2.1.0
+sqlalchemy==2.0.37
+uvicorn[standard]==0.34.0
+pytest==8.3.4
+black==24.10.0
+isort==5.13.2
+ruff==0.8.6
+-e ../packages/shared/python

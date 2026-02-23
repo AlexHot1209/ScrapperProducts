@@ -1,0 +1,57 @@
+services:
+  - type: web
+    name: ro-product-api
+    runtime: docker
+    repo: https://github.com/your-org/your-repo
+    dockerfilePath: backend/api/Dockerfile
+    dockerContext: .
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ro-product-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: ro-product-redis
+          type: redis
+          property: connectionString
+      - key: RQ_QUEUE_NAME
+        value: product-scraper
+      - key: SEARCH_PROVIDER
+        value: google
+      - key: GOOGLE_CSE_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_CX
+        sync: false
+
+  - type: worker
+    name: ro-product-worker
+    runtime: docker
+    repo: https://github.com/your-org/your-repo
+    dockerfilePath: backend/worker/Dockerfile
+    dockerContext: .
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ro-product-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: ro-product-redis
+          type: redis
+          property: connectionString
+      - key: RQ_QUEUE_NAME
+        value: product-scraper
+      - key: SEARCH_PROVIDER
+        value: google
+      - key: GOOGLE_CSE_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_CX
+        sync: false
+
+  - type: redis
+    name: ro-product-redis
+    ipAllowList: []
+
+databases:
+  - name: ro-product-db
