@@ -91,7 +91,7 @@ export default function HomePage() {
     setRadiusOption(next);
     if (next === "Bucuresti") {
       setIncludeUnknownLocation(false);
-    } else if (next !== "Bucuresti" && includeUnknownLocation === false) {
+    } else if (includeUnknownLocation === false) {
       setIncludeUnknownLocation(true);
     }
   }
