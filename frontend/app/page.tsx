@@ -153,6 +153,30 @@ export default function HomePage() {
         )}
       </section>
 
+      {jobQuery.data && (
+        <section className="panel">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="font-heading text-xl">Progres cautare</h2>
+            <p className="text-sm font-medium uppercase text-ink/70">{jobQuery.data.status}</p>
+          </div>
+          <div className="mt-4 h-3 overflow-hidden rounded-full bg-ink/10">
+            <div
+              className="h-full rounded-full bg-accent transition-all duration-300"
+              style={{ width: `${jobQuery.data.progress}%` }}
+            />
+          </div>
+          <div className="mt-3 grid gap-2 text-sm text-ink/75 sm:grid-cols-4">
+            <p>Candidati: {jobQuery.data.totalCandidateUrls}</p>
+            <p>Procesate: {jobQuery.data.processedUrls}</p>
+            <p>Produse gasite: {jobQuery.data.foundProducts}</p>
+            <p>Erori: {jobQuery.data.errors}</p>
+          </div>
+          {jobQuery.data.errorMessage && (
+            <p className="mt-3 rounded-lg bg-warn/10 px-3 py-2 text-sm text-warn">{jobQuery.data.errorMessage}</p>
+          )}
+        </section>
+      )}
+
       <section className="panel">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-heading text-xl">Rezultate</h2>
