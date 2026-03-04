@@ -66,6 +66,9 @@ Required for discovery:
 - or SerpAPI:
   - `SEARCH_PROVIDER=serpapi`
   - `SERPAPI_API_KEY`
+- or Manual (allowlist):
+  - `SEARCH_PROVIDER=manual`
+  - `ALLOWED_DOMAINS` (comma-separated domains)
 
 ## Local Run
 1. Copy env file:

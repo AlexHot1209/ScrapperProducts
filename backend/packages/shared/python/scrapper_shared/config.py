@@ -15,7 +15,9 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://postgres:postgres@localhost:5432/product_scraper",
         alias="DATABASE_URL",
     )
-    search_provider: Literal["google", "serpapi"] = Field(default="google", alias="SEARCH_PROVIDER")
+    search_provider: Literal["google", "serpapi", "manual"] = Field(
+        default="google", alias="SEARCH_PROVIDER"
+    )
     google_cse_api_key: str | None = Field(default=None, alias="GOOGLE_CSE_API_KEY")
     google_cse_cx: str | None = Field(default=None, alias="GOOGLE_CSE_CX")
     serpapi_api_key: str | None = Field(default=None, alias="SERPAPI_API_KEY")
