@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from decimal import Decimal
+from threading import Thread
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from redis.exceptions import RedisError
 from sqlalchemy import and_, asc, desc, func, select, text
 from sqlalchemy.orm import Session
 
 from scrapper_shared.config import get_settings
-from scrapper_shared.database import get_db
+from scrapper_shared.database import SessionLocal, get_db
+from scrapper_shared.discovery import discover_urls
+from scrapper_shared.enums import RadiusOption
 from scrapper_shared.models import Job, ProductResult
 from scrapper_shared.normalization import normalize_text
-from scrapper_shared.queue import get_queue, get_redis
+from scrapper_shared.scraping.pipeline import process_url
 from scrapper_shared.rate_limit import InMemoryRateLimiter
 from scrapper_shared.schemas import (
     CreateJobRequest,
@@ -24,6 +30,181 @@ from scrapper_shared.schemas import (
 router = APIRouter()
 settings = get_settings()
 rate_limiter = InMemoryRateLimiter(settings.job_rate_limit_per_minute)
+logger = logging.getLogger(__name__)
+
+
+def _to_payload(model: ProductResult) -> dict[str, object]:
+    return {
+        "product_name": model.product_name,
+        "normalized_name": model.normalized_name,
+        "domain": model.domain,
+        "source_url": model.source_url,
+        "canonical_url": model.canonical_url,
+        "price": model.price,
+        "currency": model.currency,
+        "size_text": model.size_text,
+        "location_city": model.location_city,
+        "location_address": model.location_address,
+        "location_lat": model.location_lat,
+        "location_lon": model.location_lon,
+        "distance_km": model.distance_km,
+        "location_unknown": model.location_unknown,
+        "extraction_method": model.extraction_method,
+    }
+
+
+def _process_single(
+    job_id: UUID,
+    query_normalized: str,
+    url: str,
+    radius_option: RadiusOption,
+    include_unknown: bool,
+) -> dict[str, object] | None:
+    db = SessionLocal()
+    try:
+        processed = process_url(
+            db=db,
+            query_normalized=query_normalized,
+            job_id=job_id,
+            url=url,
+            radius_option=radius_option,
+            include_unknown=include_unknown,
+        )
+        if processed.accepted and processed.result:
+            return _to_payload(processed.result)
+        return None
+    finally:
+        db.close()
+
+
+def _dedupe_key(payload: dict[str, object]) -> tuple[str, str, str]:
+    name = str(payload.get("normalized_name", ""))
+    domain = str(payload.get("domain", ""))
+    price = str(payload.get("price") or "")
+    return (name, domain, price)
+
+
+def _url_key(payload: dict[str, object]) -> str:
+    return str(payload.get("canonical_url") or payload.get("source_url") or "")
+
+
+def process_job_inline(job_id: UUID) -> None:
+    db: Session = SessionLocal()
+    started = time.monotonic()
+
+    try:
+        job = db.get(Job, job_id)
+        if not job:
+            logger.error("Job %s not found", job_id)
+            return
+
+        job.status = "running"
+        job.error_message = None
+        db.commit()
+
+        try:
+            urls = discover_urls(db, job.query, job.query_normalized, job.max_urls)
+        except Exception as exc:  # noqa: BLE001
+            job.status = "failed"
+            job.error_message = f"Discovery failed: {exc}"
+            db.commit()
+            return
+
+        urls = urls[: job.max_urls]
+        job.total_candidate_urls = len(urls)
+        db.commit()
+
+        radius = RadiusOption(job.radius_option)
+        dedupe_seen: set[tuple[str, str, str]] = set()
+        canonical_seen: set[str] = set()
+
+        with ThreadPoolExecutor(max_workers=settings.scraper_concurrency) as pool:
+            futures = {
+                pool.submit(
+                    _process_single,
+                    job.id,
+                    job.query_normalized,
+                    url,
+                    radius,
+                    job.include_unknown_location,
+                ): url
+                for url in urls
+            }
+
+            for future in as_completed(futures):
+                if time.monotonic() - started > job.time_budget_seconds:
+                    job.error_message = "Time budget reached before processing all URLs."
+                    break
+
+                job.processed_urls += 1
+                try:
+                    payload = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed URL %s: %s", futures[future], exc)
+                    job.error_count += 1
+                    db.commit()
+                    continue
+
+                if payload:
+                    key = _dedupe_key(payload)
+                    canonical = _url_key(payload)
+                    if key not in dedupe_seen and canonical not in canonical_seen:
+                        dedupe_seen.add(key)
+                        canonical_seen.add(canonical)
+                        raw_price = payload.get("price")
+                        parsed_price = None
+                        if isinstance(raw_price, (Decimal, float, int)):
+                            parsed_price = raw_price
+                        elif raw_price is not None:
+                            try:
+                                parsed_price = Decimal(str(raw_price))
+                            except Exception:  # noqa: BLE001
+                                parsed_price = None
+
+                        row = ProductResult(
+                            job_id=job.id,
+                            product_name=str(payload["product_name"]),
+                            normalized_name=str(payload["normalized_name"]),
+                            domain=str(payload["domain"]),
+                            source_url=str(payload["source_url"]),
+                            canonical_url=str(payload["canonical_url"]) if payload["canonical_url"] else None,
+                            price=parsed_price,
+                            currency=str(payload["currency"]) if payload.get("currency") else None,
+                            size_text=str(payload["size_text"]) if payload.get("size_text") else None,
+                            location_city=str(payload["location_city"])
+                            if payload.get("location_city")
+                            else None,
+                            location_address=str(payload["location_address"])
+                            if payload.get("location_address")
+                            else None,
+                            location_lat=float(payload["location_lat"])
+                            if payload.get("location_lat") is not None
+                            else None,
+                            location_lon=float(payload["location_lon"])
+                            if payload.get("location_lon") is not None
+                            else None,
+                            distance_km=float(payload["distance_km"])
+                            if payload.get("distance_km") is not None
+                            else None,
+                            location_unknown=bool(payload.get("location_unknown", True)),
+                            extraction_method=str(payload["extraction_method"]),
+                        )
+                        db.add(row)
+                        job.found_products += 1
+
+                db.commit()
+
+        if job.status != "failed":
+            job.status = "done"
+        db.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Inline worker failed for job %s: %s", job_id, exc)
+        if "job" in locals() and job:
+            job.status = "failed"
+            job.error_message = str(exc)
+            db.commit()
+    finally:
+        db.close()
 
 
 def _job_to_response(job: Job) -> JobStatusResponse:
@@ -51,7 +232,11 @@ def _job_to_response(job: Job) -> JobStatusResponse:
 
 
 @router.post("/jobs", response_model=JobStatusResponse, status_code=status.HTTP_201_CREATED)
-def create_job(payload: CreateJobRequest, request: Request, db: Session = Depends(get_db)) -> JobStatusResponse:
+def create_job(
+    payload: CreateJobRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> JobStatusResponse:
     client_ip = request.client.host if request.client else "unknown"
     if not rate_limiter.allow(client_ip):
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
@@ -70,14 +255,7 @@ def create_job(payload: CreateJobRequest, request: Request, db: Session = Depend
     db.commit()
     db.refresh(job)
 
-    try:
-        queue = get_queue()
-        queue.enqueue("worker.jobs.process_job", str(job.id), job_timeout=payload.timeBudgetSeconds + 180)
-    except Exception as exc:  # noqa: BLE001
-        job.status = "failed"
-        job.error_message = f"Queue unavailable: {exc}"
-        db.commit()
-        raise HTTPException(status_code=503, detail="Queue unavailable. Try again shortly.") from exc
+    Thread(target=process_job_inline, args=(job.id,), daemon=True).start()
 
     return _job_to_response(job)
 
@@ -155,17 +333,12 @@ def get_job_results(
 @router.get("/health", response_model=HealthResponse)
 def health(db: Session = Depends(get_db)) -> HealthResponse:
     db_status = "ok"
-    redis_status = "ok"
 
     try:
         db.execute(text("SELECT 1"))
     except Exception:
         db_status = "down"
 
-    try:
-        get_redis().ping()
-    except RedisError:
-        redis_status = "down"
-
-    overall = "ok" if db_status == "ok" and redis_status == "ok" else "degraded"
+    redis_status = "disabled"
+    overall = "ok" if db_status == "ok" else "degraded"
     return HealthResponse(status=overall, database=db_status, redis=redis_status)
