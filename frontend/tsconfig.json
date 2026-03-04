@@ -17,6 +17,7 @@
     "paths": {
       "@/components/*": ["components/*"],
       "@/lib/*": ["lib/*"],
+      "@/types": ["types/index.ts"],
       "@/types/*": ["types/*"]
     },
     "plugins": [{ "name": "next" }]
