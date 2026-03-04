@@ -15,9 +15,6 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://postgres:postgres@localhost:5432/product_scraper",
         alias="DATABASE_URL",
     )
-    redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
-    rq_queue_name: str = Field(default="product-scraper", alias="RQ_QUEUE_NAME")
-
     search_provider: Literal["google", "serpapi"] = Field(default="google", alias="SEARCH_PROVIDER")
     google_cse_api_key: str | None = Field(default=None, alias="GOOGLE_CSE_API_KEY")
     google_cse_cx: str | None = Field(default=None, alias="GOOGLE_CSE_CX")

@@ -11,7 +11,7 @@ from scrapper_shared.enums import RADIUS_KM, RadiusOption
 from scrapper_shared.location import distance_from_bucharest_km, extract_city_hint, geocode_location
 from scrapper_shared.models import CachedResult, ProductResult
 from scrapper_shared.normalization import normalize_product_name
-from scrapper_shared.queue import cache_key_for_url, ttl_expiry
+from scrapper_shared.cache_utils import cache_key_for_url, ttl_expiry
 from scrapper_shared.scraping.adapters import pick_adapter
 from scrapper_shared.scraping.extract import extract_product
 from scrapper_shared.scraping.fetch import fetch_html

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from scrapper_shared.config import get_settings
 from scrapper_shared.models import CachedUrl
-from scrapper_shared.queue import ttl_expiry
+from scrapper_shared.cache_utils import ttl_expiry
 from scrapper_shared.url_scoring import is_probably_relevant, score_url
 
 GOOGLE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"

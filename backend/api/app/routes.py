@@ -198,7 +198,7 @@ def process_job_inline(job_id: UUID) -> None:
             job.status = "done"
         db.commit()
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Inline worker failed for job %s: %s", job_id, exc)
+        logger.exception("Inline job failed for job %s: %s", job_id, exc)
         if "job" in locals() and job:
             job.status = "failed"
             job.error_message = str(exc)
@@ -339,6 +339,5 @@ def health(db: Session = Depends(get_db)) -> HealthResponse:
     except Exception:
         db_status = "down"
 
-    redis_status = "disabled"
     overall = "ok" if db_status == "ok" else "degraded"
-    return HealthResponse(status=overall, database=db_status, redis=redis_status)
+    return HealthResponse(status=overall, database=db_status)

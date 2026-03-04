@@ -3,9 +3,8 @@
 Production-ready monorepo with:
 - `frontend`: Next.js + Tailwind single-page UI
 - `backend/api`: FastAPI REST API + orchestration
-- `backend/worker`: RQ worker (Requests + Playwright fallback)
 - `backend/packages/shared/python`: shared models, schemas, discovery, scraping, normalization, location logic
-- `docker-compose.yml`: local full stack (web + api + worker + redis + postgres)
+- `docker-compose.yml`: local full stack (web + api + postgres)
 
 ## Features
 - Background jobs with polling:
@@ -48,7 +47,6 @@ Production-ready monorepo with:
 frontend/
 backend/
   api/
-  worker/
   packages/
     shared/
       python/
@@ -147,15 +145,14 @@ Run API tests in container or local venv:
 3. Build command: `npm --workspace frontend run build`
 4. Start command: `npm --workspace frontend run start`
 
-### API + Worker (Render concrete walkthrough)
+### API (Render concrete walkthrough)
 1. Push this repo to GitHub.
 2. In Render, create resources from `backend/infra/render.yaml` (Blueprint).
 3. Add secrets:
    - `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_CX` (or `SERPAPI_API_KEY`)
-4. Confirm `DATABASE_URL` and `REDIS_URL` are wired from Render-managed services.
+4. Confirm `DATABASE_URL` is wired from your database.
 5. Deploy:
    - Web Service: API (`backend/api/Dockerfile`)
-   - Worker Service: RQ worker (`backend/worker/Dockerfile`)
 6. Run migrations:
    - API startup command already applies `alembic upgrade head`.
 

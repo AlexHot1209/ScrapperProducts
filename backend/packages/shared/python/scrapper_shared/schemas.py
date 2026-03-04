@@ -62,4 +62,3 @@ class ResultsResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     database: str
-    redis: str
