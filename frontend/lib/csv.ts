@@ -5,16 +5,16 @@ function escapeCell(value: string): string {
   return `"${escaped}"`;
 }
 
-export function downloadCsv(rows: ResultItem[], fileName = "results.csv"): void {
+export function downloadCsv(rows: ResultItem[], fileName = "rezultate.csv"): void {
   const header = [
-    "Product",
-    "Website",
-    "Price",
-    "Currency",
-    "Size",
-    "Location City",
-    "Location Address",
-    "Distance Km",
+    "Produs",
+    "Site",
+    "Pret",
+    "Moneda",
+    "Marime",
+    "Oras locatie",
+    "Adresa locatie",
+    "Distanta km",
     "URL"
   ];
   const lines = rows.map((row) =>

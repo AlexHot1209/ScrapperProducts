@@ -4,13 +4,13 @@ import { QueryProvider } from "@/lib/query-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Romania Product Discovery",
-  description: "Fast product discovery and scraping across Romanian websites."
+  title: "Mythos Garden",
+  description: "Cautare dinamica de produse pe site-uri din Romania."
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="ro">
       <body>
         <QueryProvider>{children}</QueryProvider>
       </body>
