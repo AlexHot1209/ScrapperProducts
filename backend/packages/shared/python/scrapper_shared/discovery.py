@@ -10,10 +10,33 @@ from sqlalchemy.orm import Session
 from scrapper_shared.config import get_settings
 from scrapper_shared.models import CachedUrl
 from scrapper_shared.cache_utils import ttl_expiry
-from scrapper_shared.url_scoring import is_probably_relevant, score_url
+from scrapper_shared.url_scoring import domain_from_url, is_probably_relevant, score_url
 
 GOOGLE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
+
+
+def _parse_allowed_domains(raw: str | None) -> set[str]:
+    if not raw:
+        return set()
+    domains: set[str] = set()
+    for item in raw.split(","):
+        value = item.strip().lower()
+        if not value:
+            continue
+        value = value.replace("https://", "").replace("http://", "")
+        value = value.split("/")[0]
+        if value.startswith("www."):
+            value = value[4:]
+        if value:
+            domains.add(value)
+    return domains
+
+
+def _build_query(query: str, allowed_domains: set[str]) -> str:
+    if allowed_domains:
+        return query
+    return f"{query} site:.ro"
 
 
 def _cached_urls(db: Session, query_normalized: str) -> list[tuple[str, float]]:
@@ -56,7 +79,7 @@ def _google_search(query: str, max_urls: int) -> list[dict[str, Any]]:
         response = session.get(
             GOOGLE_ENDPOINT,
             params={
-                "q": f"{query} site:.ro",
+                "q": query,
                 "key": settings.google_cse_api_key,
                 "cx": settings.google_cse_cx,
                 "num": min(10, max_urls - len(items)),
@@ -88,7 +111,7 @@ def _serpapi_search(query: str, max_urls: int) -> list[dict[str, Any]]:
         SERPAPI_ENDPOINT,
         params={
             "engine": "google",
-            "q": f"{query} site:.ro",
+            "q": query,
             "api_key": settings.serpapi_api_key,
             "google_domain": "google.ro",
             "hl": "ro",
@@ -109,8 +132,10 @@ def discover_urls(db: Session, query: str, query_normalized: str, max_urls: int)
         return [url for url, _ in cached[:max_urls]]
 
     settings = get_settings()
+    allowed_domains = _parse_allowed_domains(settings.allowed_domains)
+    query_text = _build_query(query, allowed_domains)
     if settings.search_provider == "google":
-        raw = _google_search(query, max_urls)
+        raw = _google_search(query_text, max_urls)
         mapped = [
             (
                 item.get("link", ""),
@@ -120,7 +145,7 @@ def discover_urls(db: Session, query: str, query_normalized: str, max_urls: int)
         ]
         provider = "google"
     else:
-        raw = _serpapi_search(query, max_urls)
+        raw = _serpapi_search(query_text, max_urls)
         mapped = [
             (
                 item.get("link", ""),
@@ -136,6 +161,8 @@ def discover_urls(db: Session, query: str, query_normalized: str, max_urls: int)
         if not url or url in seen:
             continue
         seen.add(url)
+        if allowed_domains and domain_from_url(url) not in allowed_domains:
+            continue
         if is_probably_relevant(url):
             unique.append((url, score))
 

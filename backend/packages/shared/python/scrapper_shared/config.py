@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     google_cse_api_key: str | None = Field(default=None, alias="GOOGLE_CSE_API_KEY")
     google_cse_cx: str | None = Field(default=None, alias="GOOGLE_CSE_CX")
     serpapi_api_key: str | None = Field(default=None, alias="SERPAPI_API_KEY")
+    allowed_domains: str | None = Field(default=None, alias="ALLOWED_DOMAINS")
 
     user_agent: str = Field(
         default="RomaniaProductDiscoveryBot/1.0 (+contact: admin@example.com)",
