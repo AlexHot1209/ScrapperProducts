@@ -10,8 +10,8 @@ class CreateJobRequest(BaseModel):
     query: str = Field(min_length=2, max_length=180)
     radiusOption: RadiusOption
     includeUnknownLocation: bool = False
-    maxUrls: int = Field(default=80, ge=20, le=200)
-    timeBudgetSeconds: int = Field(default=90, ge=60, le=180)
+    maxUrls: int = Field(default=30, ge=10, le=200)
+    timeBudgetSeconds: int = Field(default=60, ge=60, le=180)
 
     @field_validator("query")
     @classmethod

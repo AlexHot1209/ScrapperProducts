@@ -94,8 +94,8 @@ export default function HomePage() {
       query: query.trim(),
       radiusOption,
       includeUnknownLocation,
-      maxUrls: 80,
-      timeBudgetSeconds: 90
+      maxUrls: 30,
+      timeBudgetSeconds: 60
     });
   }
 

@@ -57,9 +57,10 @@ def _same_domain(url: str, allowed_domains: set[str]) -> bool:
 
 def _fetch_html(base_url: str) -> str:
     settings = get_settings()
+    timeout = min(settings.request_timeout_seconds, 6)
     response = requests.get(
         base_url,
-        timeout=settings.request_timeout_seconds,
+        timeout=timeout,
         headers={"User-Agent": settings.user_agent},
     )
     response.raise_for_status()
@@ -85,6 +86,7 @@ def _manual_search(query: str, max_urls: int, allowed_domains: set[str]) -> list
         raise RuntimeError("ALLOWED_DOMAINS is required for manual discovery")
 
     tokens = [t for t in normalize_text(query).split() if len(t) >= 3]
+    top_per_domain = 3
     scored: list[tuple[str, float]] = []
     seen: set[str] = set()
 
@@ -103,14 +105,18 @@ def _manual_search(query: str, max_urls: int, allowed_domains: set[str]) -> list
         if not links:
             links = [(base_url, "")]
 
-        for url, text in links[:200]:
+        per_domain_scored: list[tuple[str, float]] = []
+        for url, text in links[:120]:
             if url in seen:
                 continue
             seen.add(url)
             score = score_url(url, text, "")
             if tokens and any(token in url.lower() or token in text.lower() for token in tokens):
                 score += 2.0
-            scored.append((url, score))
+            per_domain_scored.append((url, score))
+
+        per_domain_scored.sort(key=lambda item: item[1], reverse=True)
+        scored.extend(per_domain_scored[:top_per_domain])
 
     scored.sort(key=lambda item: item[1], reverse=True)
     top = scored[:max_urls]
