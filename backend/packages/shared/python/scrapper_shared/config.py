@@ -15,13 +15,8 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://postgres:postgres@localhost:5432/product_scraper",
         alias="DATABASE_URL",
     )
-    search_provider: Literal["google", "serpapi", "manual"] = Field(
-        default="google", alias="SEARCH_PROVIDER"
-    )
-    google_cse_api_key: str | None = Field(default=None, alias="GOOGLE_CSE_API_KEY")
-    google_cse_cx: str | None = Field(default=None, alias="GOOGLE_CSE_CX")
-    serpapi_api_key: str | None = Field(default=None, alias="SERPAPI_API_KEY")
-    allowed_domains: str | None = Field(default=None, alias="ALLOWED_DOMAINS")
+    search_provider: Literal["manual"] = Field(default="manual", alias="SEARCH_PROVIDER")
+    allowed_domains: str = Field(default="", alias="ALLOWED_DOMAINS")
 
     user_agent: str = Field(
         default="RomaniaProductDiscoveryBot/1.0 (+contact: admin@example.com)",
@@ -32,11 +27,27 @@ class Settings(BaseSettings):
     max_fetch_retries: int = Field(default=2, alias="MAX_FETCH_RETRIES")
     scraper_concurrency: int = Field(default=6, alias="SCRAPER_CONCURRENCY")
     scrape_batch_size: int = Field(default=25, alias="SCRAPE_BATCH_SIZE")
+    manual_top_urls_per_domain: int = Field(default=3, alias="MANUAL_TOP_URLS_PER_DOMAIN")
     http_max_connections: int = Field(default=100, alias="HTTP_MAX_CONNECTIONS")
     http_max_keepalive_connections: int = Field(default=40, alias="HTTP_MAX_KEEPALIVE_CONNECTIONS")
     fetch_cache_ttl_seconds: int = Field(default=600, alias="FETCH_CACHE_TTL_SECONDS")
     cache_ttl_hours: int = Field(default=24, alias="CACHE_TTL_HOURS")
     job_rate_limit_per_minute: int = Field(default=10, alias="JOB_RATE_LIMIT_PER_MINUTE")
+
+    @property
+    def allowed_domains_set(self) -> set[str]:
+        domains: set[str] = set()
+        for item in self.allowed_domains.split(","):
+            value = item.strip().lower()
+            if not value:
+                continue
+            value = value.replace("https://", "").replace("http://", "")
+            value = value.split("/")[0]
+            if value.startswith("www."):
+                value = value[4:]
+            if value:
+                domains.add(value)
+        return domains
 
 
 @lru_cache(maxsize=1)
