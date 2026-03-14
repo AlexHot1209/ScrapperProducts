@@ -118,7 +118,8 @@ def process_job_inline(job_id: UUID) -> None:
         dedupe_seen: set[tuple[str, str, str]] = set()
         canonical_seen: set[str] = set()
 
-        with ThreadPoolExecutor(max_workers=settings.scraper_concurrency) as pool:
+        pool = ThreadPoolExecutor(max_workers=settings.scraper_concurrency)
+        try:
             futures = {
                 pool.submit(
                     _process_single,
@@ -134,6 +135,8 @@ def process_job_inline(job_id: UUID) -> None:
             for future in as_completed(futures):
                 if time.monotonic() - started > job.time_budget_seconds:
                     job.error_message = "Time budget reached before processing all URLs."
+                    for pending in futures:
+                        pending.cancel()
                     break
 
                 job.processed_urls += 1
@@ -193,6 +196,8 @@ def process_job_inline(job_id: UUID) -> None:
                         job.found_products += 1
 
                 db.commit()
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
 
         if job.status != "failed":
             job.status = "done"
