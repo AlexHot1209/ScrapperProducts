@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     playwright_timeout_seconds: int = Field(default=15000, alias="PLAYWRIGHT_TIMEOUT_SECONDS")
     max_fetch_retries: int = Field(default=2, alias="MAX_FETCH_RETRIES")
     scraper_concurrency: int = Field(default=6, alias="SCRAPER_CONCURRENCY")
+    scrape_batch_size: int = Field(default=25, alias="SCRAPE_BATCH_SIZE")
+    http_max_connections: int = Field(default=100, alias="HTTP_MAX_CONNECTIONS")
+    http_max_keepalive_connections: int = Field(default=40, alias="HTTP_MAX_KEEPALIVE_CONNECTIONS")
+    fetch_cache_ttl_seconds: int = Field(default=600, alias="FETCH_CACHE_TTL_SECONDS")
     cache_ttl_hours: int = Field(default=24, alias="CACHE_TTL_HOURS")
     job_rate_limit_per_minute: int = Field(default=10, alias="JOB_RATE_LIMIT_PER_MINUTE")
 

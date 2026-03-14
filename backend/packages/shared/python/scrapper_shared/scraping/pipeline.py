@@ -6,15 +6,14 @@ from datetime import UTC, datetime
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
+from scrapper_shared.cache_utils import cache_key_for_url, ttl_expiry
 from scrapper_shared.config import get_settings
 from scrapper_shared.enums import RADIUS_KM, RadiusOption
 from scrapper_shared.location import distance_from_bucharest_km, extract_city_hint, geocode_location
 from scrapper_shared.models import CachedResult, ProductResult
 from scrapper_shared.normalization import normalize_product_name
-from scrapper_shared.cache_utils import cache_key_for_url, ttl_expiry
 from scrapper_shared.scraping.adapters import pick_adapter
 from scrapper_shared.scraping.extract import extract_product
-from scrapper_shared.scraping.fetch import fetch_html
 from scrapper_shared.url_scoring import domain_from_url
 
 
@@ -88,10 +87,9 @@ def _save_cache(db: Session, query_normalized: str, result: ProductResult) -> No
                 expires_at=ttl,
             )
         )
-    db.commit()
 
 
-def process_url(
+def process_cached_url(
     db: Session,
     query_normalized: str,
     job_id,
@@ -100,35 +98,48 @@ def process_url(
     include_unknown: bool,
 ) -> ProcessedItem:
     cached = _load_cached(db, query_normalized, url)
-    if cached:
-        distance = (
-            distance_from_bucharest_km(cached.location_lat, cached.location_lon)
-            if cached.location_lat is not None and cached.location_lon is not None
-            else None
-        )
-        if include_by_radius(radius_option, include_unknown, distance, cached.location_city):
-            model = ProductResult(
-                job_id=job_id,
-                product_name=cached.product_name,
-                normalized_name=normalize_product_name(cached.product_name),
-                domain=cached.domain,
-                source_url=cached.source_url,
-                canonical_url=cached.source_url,
-                price=cached.price,
-                currency=cached.currency,
-                size_text=cached.size_text,
-                location_city=cached.location_city,
-                location_address=cached.location_address,
-                location_lat=cached.location_lat,
-                location_lon=cached.location_lon,
-                distance_km=distance,
-                location_unknown=cached.location_lat is None,
-                extraction_method="cache",
-            )
-            return ProcessedItem(accepted=True, result=model, from_cache=True)
+    if not cached:
+        return ProcessedItem(accepted=False, result=None, from_cache=False)
+
+    distance = (
+        distance_from_bucharest_km(cached.location_lat, cached.location_lon)
+        if cached.location_lat is not None and cached.location_lon is not None
+        else None
+    )
+    if not include_by_radius(radius_option, include_unknown, distance, cached.location_city):
         return ProcessedItem(accepted=False, result=None, from_cache=True)
 
-    html, _fetch_method = fetch_html(url)
+    model = ProductResult(
+        job_id=job_id,
+        product_name=cached.product_name,
+        normalized_name=normalize_product_name(cached.product_name),
+        domain=cached.domain,
+        source_url=cached.source_url,
+        canonical_url=cached.source_url,
+        price=cached.price,
+        currency=cached.currency,
+        size_text=cached.size_text,
+        location_city=cached.location_city,
+        location_address=cached.location_address,
+        location_lat=cached.location_lat,
+        location_lon=cached.location_lon,
+        distance_km=distance,
+        location_unknown=cached.location_lat is None,
+        extraction_method="cache",
+    )
+    return ProcessedItem(accepted=True, result=model, from_cache=True)
+
+
+def process_url_with_html(
+    db: Session,
+    query_normalized: str,
+    job_id,
+    url: str,
+    html: str,
+    extraction_method: str,
+    radius_option: RadiusOption,
+    include_unknown: bool,
+) -> ProcessedItem:
     adapter = pick_adapter(url)
     extracted = adapter.extract(html, url) if adapter else extract_product(html, url)
     if not extracted or not extracted.product_name:
@@ -161,7 +172,7 @@ def process_url(
         location_lon=lon,
         distance_km=distance,
         location_unknown=lat is None,
-        extraction_method=extracted.extraction_method,
+        extraction_method=extraction_method,
     )
     _save_cache(db, query_normalized, model)
     return ProcessedItem(accepted=True, result=model, from_cache=False)

@@ -58,6 +58,13 @@ docker-compose.yml
 ## Environment Variables
 Copy `.env.example` to `.env` and fill required values.
 
+Performance tuning (optional):
+- `SCRAPER_CONCURRENCY` (default: `6`)
+- `SCRAPE_BATCH_SIZE` (default: `25`)
+- `HTTP_MAX_CONNECTIONS` (default: `100`)
+- `HTTP_MAX_KEEPALIVE_CONNECTIONS` (default: `40`)
+- `FETCH_CACHE_TTL_SECONDS` (default: `600`)
+
 Required for discovery:
 - Google CSE:
   - `SEARCH_PROVIDER=google`
