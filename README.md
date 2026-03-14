@@ -12,9 +12,7 @@ Production-ready monorepo with:
   - `GET /api/jobs/{id}`
   - `GET /api/jobs/{id}/results`
   - `GET /api/health`
-- Search discovery via supported APIs only:
-  - Google Programmable Search (CSE JSON API), or
-  - SerpAPI (`SEARCH_PROVIDER=serpapi`)
+- Search discovery via manual allowed-domain crawling only (`SEARCH_PROVIDER=manual`).
 - Extraction priority:
   1. JSON-LD schema.org Product
   2. Microdata
@@ -58,22 +56,25 @@ docker-compose.yml
 ## Environment Variables
 Copy `.env.example` to `.env` and fill required values.
 
+Performance tuning (optional):
+- `SCRAPER_CONCURRENCY` (default: `6`)
+- `SCRAPE_BATCH_SIZE` (default: `25`)
+- `HTTP_MAX_CONNECTIONS` (default: `100`)
+- `HTTP_MAX_KEEPALIVE_CONNECTIONS` (default: `40`)
+- `FETCH_CACHE_TTL_SECONDS` (default: `600`)
+- `MANUAL_TOP_URLS_PER_DOMAIN` (default: `3`)
+
 Required for discovery:
-- Google CSE:
-  - `SEARCH_PROVIDER=google`
-  - `GOOGLE_CSE_API_KEY`
-  - `GOOGLE_CSE_CX`
-- or SerpAPI:
-  - `SEARCH_PROVIDER=serpapi`
-  - `SERPAPI_API_KEY`
-- or Manual (allowlist):
-  - `SEARCH_PROVIDER=manual`
-  - `ALLOWED_DOMAINS` (comma-separated domains)
+- `SEARCH_PROVIDER=manual`
+- `ALLOWED_DOMAINS` (comma-separated domains, deduplicated at runtime)
+
+Discovery tuning (optional):
+- `MANUAL_TOP_URLS_PER_DOMAIN` (default: `3`)
 
 ## Local Run
 1. Copy env file:
    - `cp .env.example .env` (or PowerShell equivalent)
-2. Fill search API keys in `.env`.
+2. Fill manual discovery configuration in `.env` (`ALLOWED_DOMAINS`, optional tuning vars).
 3. Start stack:
    - `docker compose up --build`
 4. Open:
@@ -152,7 +153,8 @@ Run API tests in container or local venv:
 1. Push this repo to GitHub.
 2. In Render, create resources from `backend/infra/render.yaml` (Blueprint).
 3. Add secrets:
-   - `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_CX` (or `SERPAPI_API_KEY`)
+   - `ALLOWED_DOMAINS`
+   - optional performance vars (`SCRAPER_CONCURRENCY`, `SCRAPE_BATCH_SIZE`, `HTTP_MAX_CONNECTIONS`)
 4. Confirm `DATABASE_URL` is wired from your database.
 5. Deploy:
    - Web Service: API (`backend/api/Dockerfile`)
@@ -160,8 +162,8 @@ Run API tests in container or local venv:
    - API startup command already applies `alembic upgrade head`.
 
 ## Limitations / ToS / Legal Notes
-- This project intentionally does not scrape Google Search HTML.
-- It depends on official search APIs (Google CSE JSON API or SerpAPI).
+- This project intentionally does not scrape Google Search HTML or use third-party search APIs.
+- Discovery is restricted to the configured `ALLOWED_DOMAINS` list.
 - robots.txt compliance is best-effort and not a legal guarantee.
 - Site terms of service vary by domain and must be reviewed before production use.
 - Geocoding uses Nominatim (OSM); usage limits apply. Keep caching enabled.

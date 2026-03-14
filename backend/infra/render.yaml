@@ -14,10 +14,8 @@ services:
         value: manual
       - key: ALLOWED_DOMAINS
         sync: false
-      - key: GOOGLE_CSE_API_KEY
-        sync: false
-      - key: GOOGLE_CSE_CX
-        sync: false
+      - key: MANUAL_TOP_URLS_PER_DOMAIN
+        value: "3"
 
 databases:
   - name: ro-product-db
