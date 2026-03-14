@@ -1,23 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal
 from threading import Thread
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import and_, asc, desc, func, select, text
-from sqlalchemy.orm import Session
-
 from scrapper_shared.config import get_settings
 from scrapper_shared.database import SessionLocal, get_db
 from scrapper_shared.discovery import discover_urls
 from scrapper_shared.enums import RadiusOption
 from scrapper_shared.models import Job, ProductResult
 from scrapper_shared.normalization import normalize_text
-from scrapper_shared.scraping.pipeline import process_url
 from scrapper_shared.rate_limit import InMemoryRateLimiter
 from scrapper_shared.schemas import (
     CreateJobRequest,
@@ -26,6 +22,10 @@ from scrapper_shared.schemas import (
     ResultItem,
     ResultsResponse,
 )
+from scrapper_shared.scraping.fetch import AsyncFetcher
+from scrapper_shared.scraping.pipeline import process_cached_url, process_url_with_html
+from sqlalchemy import and_, asc, desc, func, select, text
+from sqlalchemy.orm import Session
 
 router = APIRouter()
 settings = get_settings()
@@ -53,30 +53,6 @@ def _to_payload(model: ProductResult) -> dict[str, object]:
     }
 
 
-def _process_single(
-    job_id: UUID,
-    query_normalized: str,
-    url: str,
-    radius_option: RadiusOption,
-    include_unknown: bool,
-) -> dict[str, object] | None:
-    db = SessionLocal()
-    try:
-        processed = process_url(
-            db=db,
-            query_normalized=query_normalized,
-            job_id=job_id,
-            url=url,
-            radius_option=radius_option,
-            include_unknown=include_unknown,
-        )
-        if processed.accepted and processed.result:
-            return _to_payload(processed.result)
-        return None
-    finally:
-        db.close()
-
-
 def _dedupe_key(payload: dict[str, object]) -> tuple[str, str, str]:
     name = str(payload.get("normalized_name", ""))
     domain = str(payload.get("domain", ""))
@@ -86,6 +62,41 @@ def _dedupe_key(payload: dict[str, object]) -> tuple[str, str, str]:
 
 def _url_key(payload: dict[str, object]) -> str:
     return str(payload.get("canonical_url") or payload.get("source_url") or "")
+
+
+def _chunked(items: list[str], size: int) -> list[list[str]]:
+    return [items[idx : idx + size] for idx in range(0, len(items), size)]
+
+
+def _to_model(job_id: UUID, payload: dict[str, object]) -> ProductResult:
+    raw_price = payload.get("price")
+    parsed_price = None
+    if isinstance(raw_price, (Decimal, float, int)):
+        parsed_price = raw_price
+    elif raw_price is not None:
+        try:
+            parsed_price = Decimal(str(raw_price))
+        except Exception:  # noqa: BLE001
+            parsed_price = None
+
+    return ProductResult(
+        job_id=job_id,
+        product_name=str(payload["product_name"]),
+        normalized_name=str(payload["normalized_name"]),
+        domain=str(payload["domain"]),
+        source_url=str(payload["source_url"]),
+        canonical_url=str(payload["canonical_url"]) if payload["canonical_url"] else None,
+        price=parsed_price,
+        currency=str(payload["currency"]) if payload.get("currency") else None,
+        size_text=str(payload["size_text"]) if payload.get("size_text") else None,
+        location_city=str(payload["location_city"]) if payload.get("location_city") else None,
+        location_address=str(payload["location_address"]) if payload.get("location_address") else None,
+        location_lat=float(payload["location_lat"]) if payload.get("location_lat") is not None else None,
+        location_lon=float(payload["location_lon"]) if payload.get("location_lon") is not None else None,
+        distance_km=float(payload["distance_km"]) if payload.get("distance_km") is not None else None,
+        location_unknown=bool(payload.get("location_unknown", True)),
+        extraction_method=str(payload["extraction_method"]),
+    )
 
 
 def process_job_inline(job_id: UUID) -> None:
@@ -117,87 +128,76 @@ def process_job_inline(job_id: UUID) -> None:
         radius = RadiusOption(job.radius_option)
         dedupe_seen: set[tuple[str, str, str]] = set()
         canonical_seen: set[str] = set()
+        persisted_rows: list[ProductResult] = []
 
-        pool = ThreadPoolExecutor(max_workers=settings.scraper_concurrency)
-        try:
-            futures = {
-                pool.submit(
-                    _process_single,
-                    job.id,
-                    job.query_normalized,
-                    url,
-                    radius,
-                    job.include_unknown_location,
-                ): url
-                for url in urls
-            }
+        async def _run_batches() -> None:
+            fetcher = AsyncFetcher()
+            try:
+                for url_batch in _chunked(urls, settings.scrape_batch_size):
+                    if time.monotonic() - started > job.time_budget_seconds:
+                        job.error_message = "Time budget reached before processing all URLs."
+                        break
 
-            for future in as_completed(futures):
-                if time.monotonic() - started > job.time_budget_seconds:
-                    job.error_message = "Time budget reached before processing all URLs."
-                    for pending in futures:
-                        pending.cancel()
-                    break
+                    fetch_targets: list[str] = []
+                    payloads: list[dict[str, object]] = []
 
-                job.processed_urls += 1
-                try:
-                    payload = future.result()
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Failed URL %s: %s", futures[future], exc)
-                    job.error_count += 1
-                    db.commit()
-                    continue
+                    for url in url_batch:
+                        cached = process_cached_url(
+                            db=db,
+                            query_normalized=job.query_normalized,
+                            job_id=job.id,
+                            url=url,
+                            radius_option=radius,
+                            include_unknown=job.include_unknown_location,
+                        )
+                        if cached.from_cache:
+                            job.processed_urls += 1
+                            if cached.accepted and cached.result:
+                                payloads.append(_to_payload(cached.result))
+                        else:
+                            fetch_targets.append(url)
 
-                if payload:
-                    key = _dedupe_key(payload)
-                    canonical = _url_key(payload)
-                    if key not in dedupe_seen and canonical not in canonical_seen:
+                    fetched_map = await fetcher.fetch_many(fetch_targets) if fetch_targets else {}
+
+                    for url in fetch_targets:
+                        outcome = fetched_map[url]
+                        job.processed_urls += 1
+                        if isinstance(outcome, Exception):
+                            logger.warning("Failed URL %s: %s", url, outcome)
+                            job.error_count += 1
+                            continue
+
+                        processed = process_url_with_html(
+                            db=db,
+                            query_normalized=job.query_normalized,
+                            job_id=job.id,
+                            url=url,
+                            html=outcome.html,
+                            extraction_method=outcome.method,
+                            radius_option=radius,
+                            include_unknown=job.include_unknown_location,
+                        )
+                        if processed.accepted and processed.result:
+                            payloads.append(_to_payload(processed.result))
+
+                    for payload in payloads:
+                        key = _dedupe_key(payload)
+                        canonical = _url_key(payload)
+                        if key in dedupe_seen or canonical in canonical_seen:
+                            continue
                         dedupe_seen.add(key)
                         canonical_seen.add(canonical)
-                        raw_price = payload.get("price")
-                        parsed_price = None
-                        if isinstance(raw_price, (Decimal, float, int)):
-                            parsed_price = raw_price
-                        elif raw_price is not None:
-                            try:
-                                parsed_price = Decimal(str(raw_price))
-                            except Exception:  # noqa: BLE001
-                                parsed_price = None
-
-                        row = ProductResult(
-                            job_id=job.id,
-                            product_name=str(payload["product_name"]),
-                            normalized_name=str(payload["normalized_name"]),
-                            domain=str(payload["domain"]),
-                            source_url=str(payload["source_url"]),
-                            canonical_url=str(payload["canonical_url"]) if payload["canonical_url"] else None,
-                            price=parsed_price,
-                            currency=str(payload["currency"]) if payload.get("currency") else None,
-                            size_text=str(payload["size_text"]) if payload.get("size_text") else None,
-                            location_city=str(payload["location_city"])
-                            if payload.get("location_city")
-                            else None,
-                            location_address=str(payload["location_address"])
-                            if payload.get("location_address")
-                            else None,
-                            location_lat=float(payload["location_lat"])
-                            if payload.get("location_lat") is not None
-                            else None,
-                            location_lon=float(payload["location_lon"])
-                            if payload.get("location_lon") is not None
-                            else None,
-                            distance_km=float(payload["distance_km"])
-                            if payload.get("distance_km") is not None
-                            else None,
-                            location_unknown=bool(payload.get("location_unknown", True)),
-                            extraction_method=str(payload["extraction_method"]),
-                        )
-                        db.add(row)
+                        persisted_rows.append(_to_model(job.id, payload))
                         job.found_products += 1
 
-                db.commit()
-        finally:
-            pool.shutdown(wait=False, cancel_futures=True)
+                    if persisted_rows:
+                        db.add_all(persisted_rows)
+                        persisted_rows.clear()
+                    db.commit()
+            finally:
+                await fetcher.close()
+
+        asyncio.run(_run_batches())
 
         if job.status != "failed":
             job.status = "done"
